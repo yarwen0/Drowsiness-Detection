@@ -1,5 +1,0 @@
-train: "/Users/nhujah/Desktop/Deep Learning/Drowsiness_detection/data/images/train"
-val:   "/Users/nhujah/Desktop/Deep Learning/Drowsiness_detection/data/images/val"
-
-nc: 2
-names: ['awake','drowsy']
