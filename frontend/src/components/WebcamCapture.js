@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -10,6 +11,8 @@ import {
   Tooltip,
   Legend
 } from 'chart.js';
+import { FaCog, FaMoon, FaSun, FaChartLine, FaBell } from 'react-icons/fa';
+import SettingsPanel from './SettingsPanel';
 
 ChartJS.register(
   CategoryScale,
@@ -56,6 +59,7 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
   const [faceBox, setFaceBox] = useState(null);
   const [eyeMarkers, setEyeMarkers] = useState(null);
   const [detectionQuality, setDetectionQuality] = useState('good'); // 'good', 'poor', 'none'
+  const [sessionId, setSessionId] = useState(null);
 
   const alarmSound = useRef(new Audio('/alarm.mp3'));
   alarmSound.current.volume = settings.alarmVolume;
@@ -77,7 +81,8 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
             image: canvas.toDataURL('image/jpeg')
           }),
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Session-ID': sessionId
           }
         });
         
@@ -104,12 +109,17 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
         if (data.eye_markers) {
           setEyeMarkers(data.eye_markers);
         }
+
+        // Update session ID if new
+        if (data.session_id && !sessionId) {
+          setSessionId(data.session_id);
+        }
       } catch (err) {
         console.error('Error detecting drowsiness:', err);
         setDetectionQuality('poor');
       }
     }
-  }, [onDrowsinessDetected]);
+  }, [onDrowsinessDetected, sessionId]);
 
   useEffect(() => {
     let stream = null;
@@ -266,6 +276,47 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
     }
   };
 
+  const handleSettingsChange = async (newSettings) => {
+    setSettings(newSettings);
+    try {
+      await fetch('http://localhost:5001/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': sessionId
+        },
+        body: JSON.stringify(newSettings)
+      });
+    } catch (err) {
+      console.error('Error updating settings:', err);
+    }
+  };
+
+  const resetSession = async () => {
+    try {
+      await fetch('http://localhost:5001/api/reset', {
+        method: 'POST',
+        headers: {
+          'X-Session-ID': sessionId
+        }
+      });
+      setStats({
+        total_drowsiness_events: 0,
+        total_blinks: 0,
+        average_blink_rate: 0,
+        session_duration: 0,
+        drowsiness_percentage: 0
+      });
+      setEarHistory([]);
+      setDetectionCount(0);
+      setConsecutiveDrowsyCount(0);
+      setLastAlertTime(null);
+      setAlertHistory([]);
+    } catch (err) {
+      console.error('Error resetting session:', err);
+    }
+  };
+
   if (error) {
     return (
       <div className="error-container">
@@ -280,95 +331,68 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
 
   return (
     <div className={`webcam-container ${isDarkMode ? 'dark-mode' : ''}`}>
-      {isLoading && (
-        <div className="loading-overlay">
-          <div className="loading-spinner"></div>
-          <p>Initializing camera...</p>
+      <div className="header">
+        <h1>Drowsiness Detection</h1>
+        <div className="controls">
+          <button
+            className="theme-toggle"
+            onClick={() => window.location.reload()}
+          >
+            {isDarkMode ? <FaSun /> : <FaMoon />}
+          </button>
+          <button
+            className="settings-toggle"
+            onClick={() => setShowSettings(!showSettings)}
+          >
+            <FaCog />
+          </button>
         </div>
-      )}
-      
-      <div className="video-wrapper">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="webcam-video"
-        />
-        
-        {settings.showFaceBox && faceBox && (
-          <div 
-            className="face-box"
-            style={{
-              left: `${faceBox.x}px`,
-              top: `${faceBox.y}px`,
-              width: `${faceBox.width}px`,
-              height: `${faceBox.height}px`
-            }}
-          />
-        )}
-        
-        {settings.showEyeMarkers && eyeMarkers && eyeMarkers.map((marker, index) => (
-          <div
-            key={index}
-            className="eye-marker"
-            style={{
-              left: `${marker.x}px`,
-              top: `${marker.y}px`
-            }}
-          />
-        ))}
       </div>
-      
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
-      
-      {isDrowsy && (
-        <div className="drowsy-overlay">
-          <div className="drowsy-warning">
-            <span className="warning-icon">⚠️</span>
-            <span className="warning-text">Stay Alert!</span>
-          </div>
+
+      <div className="main-content">
+        <div className="video-container">
+          {isLoading ? (
+            <div className="loading">Loading camera...</div>
+          ) : (
+            <>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="webcam-video"
+              />
+              {settings.showFaceBox && faceBox && (
+                <div 
+                  className="face-box"
+                  style={{
+                    left: `${faceBox.x}px`,
+                    top: `${faceBox.y}px`,
+                    width: `${faceBox.width}px`,
+                    height: `${faceBox.height}px`
+                  }}
+                />
+              )}
+              
+              {settings.showEyeMarkers && eyeMarkers && eyeMarkers.map((marker, index) => (
+                <div
+                  key={index}
+                  className="eye-marker"
+                  style={{
+                    left: `${marker.x}px`,
+                    top: `${marker.y}px`
+                  }}
+                />
+              ))}
+            </>
+          )}
         </div>
-      )}
-      
-      {showMotivationalQuote && (
-        <div className={`motivational-quote ${isAnimating ? 'animate' : ''}`}>
-          {currentQuote}
-        </div>
-      )}
-      
-      <div className="detection-quality">
-        <span className={`quality-indicator ${detectionQuality}`}>
-          {detectionQuality === 'good' ? '✓' : detectionQuality === 'poor' ? '!' : '×'}
-        </span>
-        <span className="quality-text">
-          {detectionQuality === 'good' ? 'Good Detection' : 
-           detectionQuality === 'poor' ? 'Poor Detection' : 'No Face Detected'}
-        </span>
-      </div>
-      
-      <div className="controls-panel">
-        <button 
-          className={`control-btn ${showStats ? 'active' : ''}`}
-          onClick={() => setShowStats(!showStats)}
-          title="Toggle Statistics"
-        >
-          📊
-        </button>
-        <button 
-          className={`control-btn ${showSettings ? 'active' : ''}`}
-          onClick={() => setShowSettings(!showSettings)}
-          title="Settings"
-        >
-          ⚙️
-        </button>
-      </div>
-      
-      {showStats && (
+
         <div className="stats-panel">
+          <h2>Session Statistics</h2>
           <div className="stats-grid">
             <div className="stat-item">
-              <span className="stat-label">Session Duration</span>
+              <span className="stat-label">Duration</span>
               <span className="stat-value">{getSessionDuration()}</span>
             </div>
             <div className="stat-item">
@@ -384,101 +408,41 @@ const WebcamCapture = ({ onDrowsinessDetected, isDarkMode }) => {
               <span className="stat-value">{stats.drowsiness_percentage.toFixed(1)}%</span>
             </div>
           </div>
-          
-          {settings.showGraph && (
-            <div className="graph-container">
-              <Line data={chartData} options={chartOptions} />
-            </div>
-          )}
-        </div>
-      )}
-      
-      {showSettings && (
-        <div className="settings-panel">
-          <h3>Settings</h3>
-          <div className="setting-item">
-            <label>Detection Sensitivity</label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value={settings.sensitivity}
-              onChange={(e) => setSettings(prev => ({
-                ...prev,
-                sensitivity: parseFloat(e.target.value)
-              }))}
+
+          <div className="chart-container">
+            <h3>EAR History</h3>
+            <Line
+              data={chartData}
+              options={chartOptions}
             />
           </div>
-          <div className="setting-item">
-            <label>Alarm Volume</label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value={settings.alarmVolume}
-              onChange={(e) => {
-                const volume = parseFloat(e.target.value);
-                setSettings(prev => ({ ...prev, alarmVolume: volume }));
-                alarmSound.current.volume = volume;
-              }}
-            />
-          </div>
-          <div className="setting-item">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.showGraph}
-                onChange={(e) => setSettings(prev => ({
-                  ...prev,
-                  showGraph: e.target.checked
-                }))}
-              />
-              Show Graph
-            </label>
-          </div>
-          <div className="setting-item">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.autoZenMode}
-                onChange={(e) => setSettings(prev => ({
-                  ...prev,
-                  autoZenMode: e.target.checked
-                }))}
-              />
-              Auto Zen Mode
-            </label>
-          </div>
-          <div className="setting-item">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.showFaceBox}
-                onChange={(e) => setSettings(prev => ({
-                  ...prev,
-                  showFaceBox: e.target.checked
-                }))}
-              />
-              Show Face Box
-            </label>
-          </div>
-          <div className="setting-item">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.showEyeMarkers}
-                onChange={(e) => setSettings(prev => ({
-                  ...prev,
-                  showEyeMarkers: e.target.checked
-                }))}
-              />
-              Show Eye Markers
-            </label>
-          </div>
+
+          <button className="reset-btn" onClick={resetSession}>
+            Reset Session
+          </button>
         </div>
-      )}
+      </div>
+
+      <AnimatePresence>
+        {isDrowsy && (
+          <motion.div
+            className="drowsiness-warning"
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+          >
+            <FaBell className="warning-icon" />
+            <p>{quotes[Math.floor(Math.random() * quotes.length)]}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <SettingsPanel
+        settings={settings}
+        onSettingsChange={handleSettingsChange}
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 };
